@@ -106,11 +106,20 @@ NGINX
   test "$(systemctl show nginx -p MainPID --value)" = "$master"
 }
 write_conf no
-test "$(curl -fsS --max-time 12 --resolve "$host:80:$ip" "http://$host/.well-known/acme-challenge/preflight")" = milanium-acme-ready
+echo 'Waiting for the new MILANIUM-only HTTP route after the graceful reload.'
+for attempt in 1 2 3 4 5 6 7 8; do
+  probe="$(curl --noproxy '*' -fsS --max-time 5 --resolve "$host:80:$ip" "http://$host/.well-known/acme-challenge/preflight" 2>/dev/null || true)"
+  if [[ "$probe" == milanium-acme-ready ]]; then break; fi
+  sleep 2
+done
+if [[ "$probe" != milanium-acme-ready ]]; then
+  curl --noproxy '*' -sS --max-time 5 --resolve "$host:80:$ip" -o /dev/null -w 'MILANIUM challenge status: %{http_code}\n' "http://$host/.well-known/acme-challenge/preflight" || true
+  exit 1
+fi
 certbot certonly --webroot -w "$root/acme" --cert-name "$host" -d "$host" --non-interactive --agree-tos --register-unsafely-without-email --no-directory-hooks --pre-hook true --post-hook true --deploy-hook true
 write_conf yes
 expected="$(sha256sum "$root/site/index.html" | cut -d ' ' -f 1)"
-actual="$(curl -fsS --retry 2 --max-time 15 --resolve "$host:443:$ip" "https://$host/" | sha256sum | cut -d ' ' -f 1)"
+actual="$(curl --noproxy '*' -fsS --retry 6 --retry-all-errors --retry-delay 2 --max-time 10 --resolve "$host:443:$ip" "https://$host/" | sha256sum | cut -d ' ' -f 1)"
 test "$actual" = "$expected"
 curl -fsS --max-time 15 "https://$host/robots.txt" >/dev/null
 neighbor
