@@ -1,4 +1,4 @@
-name: Publish MILANIUM only
+name: Connect milanium.kz only
 on:
   workflow_dispatch:
 permissions:
@@ -16,6 +16,17 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Confirm public DNS before touching the server
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import socket
+          host = "milanium.kz"
+          ips={x[4][0] for x in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+          if ips != {"89.126.192.185"}:
+              raise SystemExit(f"DNS for {host} must resolve only to the shared VPS; resolved: {sorted(ips)}")
+          print("Public DNS points to the intended VPS.")
+          PY
       - name: Publish exact static bundle and verify neighbor services
         env:
           SSHPASS: ${{ secrets.MILANIUM_VPS_SSH_PASSWORD }}
@@ -24,8 +35,8 @@ jobs:
           set -euo pipefail
           test -n "$SSHPASS"
           command -v sshpass >/dev/null
-          bundle=deploy/milanium-vps-static.zip
-          digest=e9e87a61a5ff8443980241d03c00c6dcdb2c621d35b61ea73bf5edd87f2d9559
+          bundle=deploy/milanium-kz-static.zip
+          digest=d26c871407fb55316b192baa73ddf8891beb34d28e49eb16e706532a34e3f6a2
           printf '%s  %s\n' "$digest" "$bundle" | sha256sum --check --status
           bash -n deploy/publish-initial.sh
           umask 077
@@ -50,5 +61,10 @@ jobs:
           trap 'rm -f "$f"' EXIT
           curl -fsS --retry 2 --max-time 15 https://milanium.kz/ > "$f"
           grep -q 'MILANIUM' "$f"
+          grep -q 'rel="canonical" href="https://milanium.kz' "$f"
+          grep -q 'name="robots" content="index, follow"' "$f"
+          curl -fsS https://milanium.kz/robots.txt | grep -Fx 'Sitemap: https://milanium.kz/sitemap.xml'
+          curl -fsS https://milanium.kz/sitemap.xml | grep -F '<loc>https://milanium.kz/</loc>'
+          curl -fsS --max-time 15 -o /dev/null https://milanium.89.126.192.185.sslip.io/
           curl -fsS --max-time 15 -o /dev/null https://mtaxi.89.126.192.185.sslip.io/
           curl -fsS --max-time 15 -o /dev/null https://mbusiness.89.126.192.185.sslip.io:8443/
