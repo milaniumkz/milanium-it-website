@@ -30,38 +30,9 @@ exec 9>/run/lock/milanium-publish.lock
 flock -n 9
 printf '%s  %s\n' "$check_sum" "$arch" | sha256sum --check --status
 test -d /etc/nginx/conf.d
-for p in "$root" "$conf" /etc/nginx/sites-available/milanium.kz.conf /etc/nginx/sites-enabled/milanium.kz.conf; do
-  if [[ -e "$p" || -L "$p" ]]; then echo 'MILANIUM path is already occupied; no overwrite'; exit 1; fi
-done
-nginx -t
-# The HTTP-01 challenge must reach this VPS via the public domain.
-dns_ipv4="$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u)"
-if [[ "$dns_ipv4" != "$ip" ]]; then
-  echo "Expected $host to resolve only to IPv4 address $ip" >&2
-  exit 1
-fi
-nginx_config="$(nginx -T 2>/dev/null)"
-if awk -v host="$host" '
-    $1 == "server_name" {
-        for (i = 2; i <= NF; i++) {
-            sub(/;$/, "", $i)
-            if ($i == host) found = 1
-        }
-    }
-    END { exit !found }
-' <<<"$nginx_config"; then
-  echo 'Hostname already configured'; exit 1
-fi
-neighbor() {
-  curl -fsS --max-time 15 -o /dev/null https://mtaxi.89.126.192.185.sslip.io/
-  curl -fsS --max-time 15 -o /dev/null https://mbusiness.89.126.192.185.sslip.io:8443/
-}
-neighbor
-master="$(systemctl show nginx -p MainPID --value)"
-test "$master" -gt 0
-install -d -m 755 "$root"
-created=1
-python3 - "$arch" "$root" "$host" <<'PY'
+
+extract_site() {
+python3 - "$arch" "$1" "$host" <<'PY'
 import pathlib, stat, sys, zipfile
 from shutil import copyfileobj
 with zipfile.ZipFile(sys.argv[1]) as z:
@@ -89,6 +60,94 @@ for path in site.rglob("*"):
         data = data.replace(b"noindex, follow", b"index, follow")
     path.write_bytes(data)
 PY
+}
+
+neighbor() {
+  curl -fsS --max-time 15 -o /dev/null https://mtaxi.89.126.192.185.sslip.io/
+  curl -fsS --max-time 15 -o /dev/null https://mbusiness.89.126.192.185.sslip.io:8443/
+}
+
+exchange_sites() {
+  python3 - "$1" "$2" <<'PY'
+import ctypes
+import os
+import sys
+
+renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+renameat2.restype = ctypes.c_int
+at_fdcwd = -100
+rename_exchange = 2
+if renameat2(at_fdcwd, os.fsencode(sys.argv[1]), at_fdcwd, os.fsencode(sys.argv[2]), rename_exchange):
+    raise OSError(ctypes.get_errno(), "Could not atomically exchange MILANIUM releases")
+PY
+}
+
+if [[ -f "$root/site/index.html" && -f "$conf" ]]; then
+  # Reuse the existing host and certificate. Stage next to the served directory.
+  test ! -L "$root" && test ! -L "$root/site" && test ! -L "$conf"
+  grep -Fx "    root $root/site;" "$conf" >/dev/null
+  nginx -t
+  neighbor
+  staged="$(mktemp -d "$root/release.XXXXXXXXXX")"
+  exchanged=0
+  finish_update() {
+    local status=$?
+    trap - EXIT
+    if (( status != 0 )); then
+      if (( ! exchanged )) || exchange_sites "$root/site" "$staged/site"; then
+        rm -rf -- "$staged"
+      else
+        echo "MILANIUM rollback requires operator review: $staged/site" >&2
+      fi
+    fi
+    rm -f -- "$arch"
+    exit "$status"
+  }
+  trap finish_update EXIT
+  extract_site "$staged"
+  test -s "$staged/site/index.html"
+  expected="$(sha256sum "$staged/site/index.html" | cut -d ' ' -f 1)"
+  exchange_sites "$root/site" "$staged/site"
+  exchanged=1
+  actual="$(curl --noproxy '*' -fsS --max-time 15 --resolve "$host:443:$ip" "https://$host/" | sha256sum | cut -d ' ' -f 1)"
+  test "$actual" = "$expected"
+  curl -fsS --max-time 15 "https://$host/robots.txt" >/dev/null
+  neighbor
+  echo "Verified HTTPS: https://$host/"
+  echo "Previous MILANIUM release: $staged/site"
+  exit 0
+fi
+
+for p in "$root" "$conf" /etc/nginx/sites-available/milanium.kz.conf /etc/nginx/sites-enabled/milanium.kz.conf; do
+  if [[ -e "$p" || -L "$p" ]]; then echo 'MILANIUM path is already occupied; no overwrite'; exit 1; fi
+done
+nginx -t
+# The HTTP-01 challenge must reach this VPS via the public domain.
+dns_ipv4="$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u)"
+if [[ "$dns_ipv4" != "$ip" ]]; then
+  echo "Expected $host to resolve only to IPv4 address $ip" >&2
+  exit 1
+fi
+nginx_config="$(nginx -T 2>/dev/null)"
+if awk -v host="$host" '
+    $1 == "server_name" {
+        for (i = 2; i <= NF; i++) {
+            sub(/;$/, "", $i)
+            if ($i == host) found = 1
+        }
+    }
+    END { exit !found }
+' <<<"$nginx_config"; then
+  echo 'Hostname already configured'; exit 1
+fi
+
+neighbor
+master="$(systemctl show nginx -p MainPID --value)"
+test "$master" -gt 0
+install -d -m 755 "$root"
+created=1
+extract_site "$root"
 test -s "$root/site/index.html"
 install -d -m 755 "$root/acme/.well-known/acme-challenge"
 printf '%s' milanium-acme-ready > "$root/acme/.well-known/acme-challenge/preflight"
