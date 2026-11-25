@@ -36,7 +36,7 @@ jobs:
           test -n "$SSHPASS"
           command -v sshpass >/dev/null
           bundle=deploy/milanium-kz-static.zip
-          digest=b4d6661326d6d9539881dbe4c2712c555e82e6cf4b19ee9d4498089940faa01c
+          digest=51ef030d85788477900b2dc08dc86e161584780e04302e578c953bbb1d20a0ee
           printf '%s  %s\n' "$digest" "$bundle" | sha256sum --check --status
           bash -n deploy/publish-initial.sh
           umask 077
@@ -63,7 +63,7 @@ jobs:
           grep -q 'MILANIUM' "$f"
           grep -q 'rel="canonical" href="https://milanium.kz' "$f"
           grep -q 'name="robots" content="index, follow"' "$f"
-          grep -Fq "Работаем удалённо по Казахстану, России и другим странам СНГ" "$f"
+          grep -Fq "Работаем по Казахстану, России и другим странам СНГ" "$f"
           grep -Fq "Разработка приложений и сайтов в Казахстане и России | MILANIUM" "$f"
           curl -fsS https://milanium.kz/robots.txt | grep -Fx 'Sitemap: https://milanium.kz/sitemap.xml'
           curl -fsS https://milanium.kz/sitemap.xml | grep -F '<loc>https://milanium.kz/</loc>'
