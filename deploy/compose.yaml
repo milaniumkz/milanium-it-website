@@ -1,0 +1,29 @@
+# Run only after reviewing the supplied site image and verifying host capacity.
+name: milanium-web
+services:
+  web:
+    image: ${MILANIUM_IMAGE:?Set a reviewed immutable image digest}
+    ports:
+      - "127.0.0.1:${MILANIUM_HOST_PORT:?Choose a free loopback port}:${MILANIUM_CONTAINER_PORT:?Set the app listening port}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    mem_limit: 256m
+    cpus: 0.50
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - site
+networks:
+  site:
+    driver: bridge
