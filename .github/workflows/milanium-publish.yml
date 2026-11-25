@@ -36,7 +36,7 @@ jobs:
           test -n "$SSHPASS"
           command -v sshpass >/dev/null
           bundle=deploy/milanium-kz-static.zip
-          digest=51ef030d85788477900b2dc08dc86e161584780e04302e578c953bbb1d20a0ee
+          digest=d2d4630c3a2280b14e13774d6888dac662fa03a8fa98df8801114beee1a89d17
           printf '%s  %s\n' "$digest" "$bundle" | sha256sum --check --status
           bash -n deploy/publish-initial.sh
           umask 077
