@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-host=milanium.89.126.192.185.sslip.io
+host=milanium.kz
 ip=89.126.192.185
-root=/var/www/milanium
-conf=/etc/nginx/conf.d/milanium.conf
+root=/var/www/milanium.kz
+conf=/etc/nginx/conf.d/milanium.kz.conf
 arch="${1:?}"
 check_sum="${2:?}"
 [[ "$arch" =~ ^/tmp/milanium\.release\.[A-Za-z0-9]{10}$ && "$check_sum" =~ ^[a-f0-9]{64}$ ]]
@@ -30,11 +30,26 @@ exec 9>/run/lock/milanium-publish.lock
 flock -n 9
 printf '%s  %s\n' "$check_sum" "$arch" | sha256sum --check --status
 test -d /etc/nginx/conf.d
-for p in "$root" "$conf" /etc/nginx/sites-available/milanium.conf /etc/nginx/sites-enabled/milanium.conf; do
+for p in "$root" "$conf" /etc/nginx/sites-available/milanium.kz.conf /etc/nginx/sites-enabled/milanium.kz.conf; do
   if [[ -e "$p" || -L "$p" ]]; then echo 'MILANIUM path is already occupied; no overwrite'; exit 1; fi
 done
 nginx -t
-if nginx -T 2>/dev/null | grep -F -- "$host" >/dev/null; then
+# The HTTP-01 challenge must reach this VPS via the public domain.
+dns_ipv4="$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u)"
+if [[ "$dns_ipv4" != "$ip" ]]; then
+  echo "Expected $host to resolve only to IPv4 address $ip" >&2
+  exit 1
+fi
+nginx_config="$(nginx -T 2>/dev/null)"
+if awk -v host="$host" '
+    $1 == "server_name" {
+        for (i = 2; i <= NF; i++) {
+            sub(/;$/, "", $i)
+            if ($i == host) found = 1
+        }
+    }
+    END { exit !found }
+' <<<"$nginx_config"; then
   echo 'Hostname already configured'; exit 1
 fi
 neighbor() {
@@ -46,7 +61,7 @@ master="$(systemctl show nginx -p MainPID --value)"
 test "$master" -gt 0
 install -d -m 755 "$root"
 created=1
-python3 - "$arch" "$root" <<'PY'
+python3 - "$arch" "$root" "$host" <<'PY'
 import pathlib, stat, sys, zipfile
 from shutil import copyfileobj
 with zipfile.ZipFile(sys.argv[1]) as z:
@@ -62,6 +77,17 @@ with zipfile.ZipFile(sys.argv[1]) as z:
             target.parent.mkdir(parents=True,exist_ok=True)
             with z.open(info) as f,target.open('xb') as g: copyfileobj(f,g)
             target.chmod(0o644)
+
+site = pathlib.Path(sys.argv[2], "site")
+old_origin = b"https://milanium.89.126.192.185.sslip.io"
+new_origin = b"https://" + sys.argv[3].encode("ascii")
+for path in site.rglob("*"):
+    if path.suffix not in {".html", ".txt", ".xml"}:
+        continue
+    data = path.read_bytes().replace(old_origin, new_origin)
+    if "_not-found" not in path.relative_to(site).as_posix() and path.name != "404.html":
+        data = data.replace(b"noindex, follow", b"index, follow")
+    path.write_bytes(data)
 PY
 test -s "$root/site/index.html"
 install -d -m 755 "$root/acme/.well-known/acme-challenge"
@@ -116,7 +142,7 @@ if [[ "$probe" != milanium-acme-ready ]]; then
   curl --noproxy '*' -sS --max-time 5 --resolve "$host:80:$ip" -o /dev/null -w 'MILANIUM challenge status: %{http_code}\n' "http://$host/.well-known/acme-challenge/preflight" || true
   exit 1
 fi
-certbot certonly --webroot -w "$root/acme" --cert-name "$host" -d "$host" --non-interactive --agree-tos --register-unsafely-without-email --no-directory-hooks --pre-hook true --post-hook true --deploy-hook true
+certbot certonly --webroot -w "$root/acme" --cert-name "$host" -d "$host" --non-interactive --agree-tos --register-unsafely-without-email --no-directory-hooks --pre-hook true --post-hook true --deploy-hook 'nginx -t && systemctl reload nginx'
 write_conf yes
 expected="$(sha256sum "$root/site/index.html" | cut -d ' ' -f 1)"
 actual="$(curl --noproxy '*' -fsS --retry 6 --retry-all-errors --retry-delay 2 --max-time 10 --resolve "$host:443:$ip" "https://$host/" | sha256sum | cut -d ' ' -f 1)"

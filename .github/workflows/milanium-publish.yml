@@ -48,7 +48,7 @@ jobs:
           set -euo pipefail
           f="$(mktemp)"
           trap 'rm -f "$f"' EXIT
-          curl -fsS --retry 2 --max-time 15 https://milanium.89.126.192.185.sslip.io/ > "$f"
+          curl -fsS --retry 2 --max-time 15 https://milanium.kz/ > "$f"
           grep -q 'MILANIUM' "$f"
           curl -fsS --max-time 15 -o /dev/null https://mtaxi.89.126.192.185.sslip.io/
           curl -fsS --max-time 15 -o /dev/null https://mbusiness.89.126.192.185.sslip.io:8443/

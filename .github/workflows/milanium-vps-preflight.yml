@@ -34,10 +34,10 @@ jobs:
           command -v certbot >/dev/null
           command -v curl >/dev/null
           nginx -t > /dev/null 2>&1
-          test ! -e /etc/nginx/conf.d/milanium.conf
-          test ! -e /etc/nginx/sites-available/milanium.conf
-          test ! -e /etc/nginx/sites-enabled/milanium.conf
-          test ! -e /var/www/milanium
+          test ! -e /etc/nginx/conf.d/milanium.kz.conf
+          test ! -e /etc/nginx/sites-available/milanium.kz.conf
+          test ! -e /etc/nginx/sites-enabled/milanium.kz.conf
+          test ! -e /var/www/milanium.kz
           curl --silent --show-error --fail --max-time 12 --output /dev/null https://mtaxi.89.126.192.185.sslip.io/
           echo 'MTaxi HTTPS baseline: OK'
           curl --silent --show-error --fail --max-time 12 --output /dev/null https://mbusiness.89.126.192.185.sslip.io:8443/
