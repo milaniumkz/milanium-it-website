@@ -1,0 +1,46 @@
+name: MILANIUM VPS preflight
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: milanium-vps
+  cancel-in-progress: false
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: milanium-production
+    timeout-minutes: 3
+    steps:
+      - name: Read-only readiness check
+        env:
+          SSHPASS: ${{ secrets.MILANIUM_VPS_SSH_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo 'MILANIUM SSH access secret is missing'; exit 1; }
+          command -v sshpass >/dev/null
+          umask 077
+          hostkey="$(mktemp)"
+          trap 'rm -f "$hostkey"' EXIT
+          printf '%s\n' '89.126.192.185 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDY8hkshZ0Nhs9jOJzO1aYdJqf2UjZHqpvlnAKDV552G' > "$hostkey"
+          sshpass -e ssh -F /dev/null -o ConnectTimeout=12 -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o "UserKnownHostsFile=$hostkey" \
+            -o HostKeyAlgorithms=ssh-ed25519 -o PubkeyAuthentication=no -o PreferredAuthentications=password \
+            root@89.126.192.185 'sh -s' <<'REMOTE'
+          set -eu
+          test "$(id -u)" = 0
+          command -v nginx >/dev/null
+          command -v certbot >/dev/null
+          command -v curl >/dev/null
+          nginx -t > /dev/null 2>&1
+          test ! -e /etc/nginx/conf.d/milanium.conf
+          test ! -e /etc/nginx/sites-available/milanium.conf
+          test ! -e /etc/nginx/sites-enabled/milanium.conf
+          test ! -e /var/www/milanium
+          curl --silent --show-error --fail --max-time 12 --output /dev/null https://mtaxi.89.126.192.185.sslip.io/
+          echo 'MTaxi HTTPS baseline: OK'
+          curl --silent --show-error --fail --max-time 12 --output /dev/null https://mbusiness.89.126.192.185.sslip.io:8443/
+          echo 'MBusiness HTTPS baseline: OK'
+          echo 'VPS preflight passed. No files, services or configuration were changed.'
+          REMOTE
